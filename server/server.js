@@ -77,7 +77,7 @@ io.on('connection',(socket)=>{
         socket.data.username = username
         socket.data.role = role
 
-        const participantsList = [...room.participants.value()];
+        const participantsList = [...room.participants.values()];
 
         //tell the joiner their role and who are the participants
         socket.emit('room_joined',{
