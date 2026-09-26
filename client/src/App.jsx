@@ -3,6 +3,21 @@ import YoutubePlayer from './YoutubePlayer';
 import ChangeVideoForm from './ChangeVideoForm';
 import { socket } from './services/socketService';
 
+function syncPlayer(player, { videoId, currentTime = 0, playState = "paused" }, forceLoad = false) {
+  if (!player || !videoId) return;
+
+  const startSeconds = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+  if (forceLoad || player.getVideoData?.()?.video_id !== videoId) {
+    const method = playState === "playing" ? "loadVideoById" : "cueVideoById";
+    player[method]({ videoId, startSeconds });
+    return;
+  }
+
+  if (Math.abs((player.getCurrentTime?.() || 0) - startSeconds) > 1.5) player.seekTo(startSeconds, true);
+  if (playState === "playing" && player.getPlayerState?.() !== 1) player.playVideo();
+  if (playState === "paused" && player.getPlayerState?.() !== 2) player.pauseVideo();
+}
+
 function App() {
   const [connected, setConnected] = useState(socket.connected);
   const [roomId, setRoomId] = useState("");
@@ -12,21 +27,20 @@ function App() {
   const [participants, setParticipants] = useState([]);
   const [videoId, setVideoId] = useState(null);
   const playerRef = useRef(null);
+  const roomPlaybackRef = useRef({ videoId: null, currentTime: 0, playState: "paused" });
 
-  useEffect(() => {
+  useEffect(() => { // handle the connect and disconnect events
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
-
-    const handleJoinedRoom = ({ role: myRole, participants: roomParticipants, videoId: roomVideoId, currentTime }) => {
+    // handle the joined room event
+    const handleJoinedRoom = ({ role: myRole, participants: roomParticipants, videoId: roomVideoId, currentTime, playState }) => {
       setJoined(true);
       setRole(myRole);
       setParticipants(roomParticipants || []);
-      if (roomVideoId) {
-        setVideoId(roomVideoId);
-        if (playerRef.current?.loadVideoById) {
-          playerRef.current.loadVideoById(roomVideoId, currentTime || 0);
-        }
-      }
+      const playback = { videoId: roomVideoId || null, currentTime: currentTime || 0, playState: playState || "paused" };
+      roomPlaybackRef.current = playback;
+      setVideoId(playback.videoId);
+      syncPlayer(playerRef.current, playback);
     };
 
     const handleUserJoined = ({ participants: roomParticipants }) => {
@@ -43,36 +57,19 @@ function App() {
       }
     };
 
-    const handleSyncState = ({ playState, currentTime, videoId: newVideoId }) => {
-      if (newVideoId !== undefined) {
-        setVideoId(newVideoId);
-      }
-      const player = playerRef.current;
-      if (!player) return;
-
-      const currentPlayingId = player.getVideoData?.()?.video_id;
-      if (newVideoId && currentPlayingId !== newVideoId) {
-        player.loadVideoById(newVideoId, currentTime || 0);
-        return;
-      }
-
-      if (typeof currentTime === "number") {
-        const drift = Math.abs(player.getCurrentTime() - currentTime);
-        if (drift > 1.5) {
-          player.seekTo(currentTime, true);
-        }
-      }
-
-      if (playState === "playing" && player.getPlayerState() !== 1) {
-        player.playVideo();
-      }
-      if (playState === "paused" && player.getPlayerState() !== 2) {
-        player.pauseVideo();
-      }
+    const handleSyncState = ({ playState, currentTime, videoId: newVideoId }) => { // synchronise state across all clients
+      const playback = {
+        videoId: newVideoId ?? roomPlaybackRef.current.videoId,
+        currentTime: currentTime ?? roomPlaybackRef.current.currentTime,
+        playState: playState ?? roomPlaybackRef.current.playState
+      };
+      roomPlaybackRef.current = playback;
+      setVideoId(playback.videoId);
+      syncPlayer(playerRef.current, playback);
     };
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
+    socket.on("connect", handleConnect); // handle the connection event
+    socket.on("disconnect", handleDisconnect); // handle the disconnection event
     socket.on("joined_room", handleJoinedRoom);
     socket.on("room_joined", handleJoinedRoom);
     socket.on("user_joined", handleUserJoined);
@@ -81,33 +78,36 @@ function App() {
     socket.on("sync_state", handleSyncState);
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("joined_room", handleJoinedRoom);
-      socket.off("room_joined", handleJoinedRoom);
-      socket.off("user_joined", handleUserJoined);
-      socket.off("user_left", handleUserLeft);
-      socket.off("room_updated", handleRoomUpdated);
-      socket.off("sync_state", handleSyncState);
+      socket.off("connect", handleConnect);  // remove the connection event listener
+      socket.off("disconnect", handleDisconnect);  // remove the disconnection event listener
+      socket.off("joined_room", handleJoinedRoom); // remove the joined room event listener
+      socket.off("room_joined", handleJoinedRoom); // remove the room joined event listener
+      socket.off("user_joined", handleUserJoined); // remove the user joined event listener
+      socket.off("user_left", handleUserLeft); // remove the user left event listener
+      socket.off("room_updated", handleRoomUpdated); // remove the room updated event listener
+      socket.off("sync_state", handleSyncState); // remove the sync state event listener
     };
   }, []);
 
-  const handleJoin = (e) => {
+  const handleJoin = (e) => {  // handle the join event
     e?.preventDefault();
     if (!roomId.trim() || !username.trim()) return;
     socket.emit("join_room", { roomId: roomId.trim(), username: username.trim() });
   };
 
   const handlePlayerReady = (player) => {
-    playerRef.current = player;
-    if (videoId) {
-      player.loadVideoById(videoId, 0);
-    }
+    playerRef.current = player;  // set the player ref
+    syncPlayer(player, roomPlaybackRef.current, true);
   };
 
-  const canControl = role === "host" || role === "moderator";
+  const getPlayerTime = () => {
+    const currentTime = playerRef.current?.getCurrentTime?.();
+    return Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+  };
 
-  if (!joined) {
+  const canControl = role === "host" || role === "moderator"; // check if the user is host or moderator
+
+  if (!joined) { // if the user is not joined
     return (
       <div style={{ maxWidth: 480, margin: "60px auto", padding: 30, fontFamily: "system-ui, sans-serif", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
         <h1 style={{ marginTop: 0, marginBottom: 10, color: "#111" }}>Watch Party</h1>
@@ -178,13 +178,13 @@ function App() {
           <div style={{ display: "flex", gap: 10, marginBottom: 15 }}>
             <button
               style={{ padding: "8px 20px", cursor: "pointer", fontWeight: "bold", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: 5 }}
-              onClick={() => socket.emit("play")}
+              onClick={() => socket.emit("play", { currentTime: getPlayerTime() })}
             >
               ▶ Play
             </button>
             <button
               style={{ padding: "8px 20px", cursor: "pointer", fontWeight: "bold", backgroundColor: "#f59e0b", color: "white", border: "none", borderRadius: 5 }}
-              onClick={() => socket.emit("pause")}
+              onClick={() => socket.emit("pause", { currentTime: getPlayerTime() })}
             >
               ⏸ Pause
             </button>
