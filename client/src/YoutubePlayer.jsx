@@ -37,9 +37,19 @@ function loadYoutubeAPI() {
 function YoutubePlayer({ videoId, onPlayerReady }) {
   const containerRef = useRef(null);
   const playerRef = useRef(null);
+  const onPlayerReadyRef = useRef(onPlayerReady);
+
+  useEffect(() => {
+    onPlayerReadyRef.current = onPlayerReady;
+  }, [onPlayerReady]);
 
   useEffect(() => {
     let cancelled = false;
+
+    // Do not create an empty YouTube player. The iframe API treats an omitted or
+    // undefined ID inconsistently, and it also creates a race for users joining
+    // a room that already has a selected video.
+    if (!videoId) return undefined;
 
     loadYoutubeAPI().then((YT) => {
       if (cancelled || !containerRef.current) return;
@@ -56,7 +66,7 @@ function YoutubePlayer({ videoId, onPlayerReady }) {
       playerRef.current = new YT.Player(containerRef.current, {
         height: "390",
         width: "640",
-        videoId: videoId || undefined,
+        videoId,
         playerVars: {
           autoplay: 0,
           controls: 1, // controls enabled so users can see player controls
@@ -67,7 +77,7 @@ function YoutubePlayer({ videoId, onPlayerReady }) {
         events: {
           onReady: (event) => {
             if (!cancelled) {
-              onPlayerReady(event.target);
+              onPlayerReadyRef.current(event.target);
             }
           }
         },
@@ -84,7 +94,7 @@ function YoutubePlayer({ videoId, onPlayerReady }) {
         }
       }
     };
-  }, []);
+  }, [videoId]);
 
   return (
     <div style={{ marginTop: 20, marginBottom: 20 }}>
