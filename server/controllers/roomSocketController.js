@@ -7,11 +7,11 @@ function registerSocketHandlers(io, socket) {
       return socket.emit('error', 'roomId and username are required!');
     }
 
-    const existingRoom = roomModel.getRoom(roomId);
+    const existingRoom = roomModel.getRoom(roomId); //if the room exists, the user is a participant, else host
     const role = existingRoom ? 'participant' : 'host';
 
-    const { room, participant } = roomModel.addParticipant(roomId, socket.id, username, role);
-
+    const { room, participant } = roomModel.addParticipant(roomId, socket.id, username, role); //add participant to the room
+    //add the socket to the room
     socket.join(roomId);
     socket.data.roomId = roomId;
     socket.data.username = username;
@@ -27,7 +27,7 @@ function registerSocketHandlers(io, socket) {
       participants: participantsList,
       videoId: room.videoId,
       playState: room.playState,
-      currentTime: room.currentTime
+      currentTime: roomModel.getCurrentTime(room)
     };
     socket.emit('joined_room', joinPayload);
     socket.emit('room_joined', joinPayload);
@@ -46,7 +46,7 @@ function registerSocketHandlers(io, socket) {
   });
 
   // Play
-  socket.on('play', () => {
+  socket.on('play', ({ currentTime } = {}) => {
     const roomId = socket.data.roomId;
     const room = roomModel.getRoom(roomId);
     const participant = room?.participants.get(socket.id);
@@ -54,16 +54,16 @@ function registerSocketHandlers(io, socket) {
       return socket.emit('error', 'Not permitted to play video');
     }
 
-    roomModel.updatePlayState(roomId, 'playing');
+    roomModel.updatePlayState(roomId, 'playing', currentTime);
     io.to(roomId).emit('sync_state', {
       playState: room.playState,
-      currentTime: room.currentTime,
+      currentTime: roomModel.getCurrentTime(room),
       videoId: room.videoId
     });
   });
 
   // Pause
-  socket.on('pause', () => {
+  socket.on('pause', ({ currentTime } = {}) => {
     const roomId = socket.data.roomId;
     const room = roomModel.getRoom(roomId);
     const participant = room?.participants.get(socket.id);
@@ -71,16 +71,16 @@ function registerSocketHandlers(io, socket) {
       return socket.emit('error', 'Not permitted to pause video');
     }
 
-    roomModel.updatePlayState(roomId, 'paused');
+    roomModel.updatePlayState(roomId, 'paused', currentTime);
     io.to(roomId).emit('sync_state', {
       playState: room.playState,
-      currentTime: room.currentTime,
+      currentTime: roomModel.getCurrentTime(room),
       videoId: room.videoId
     });
   });
 
   // Change Video
-  socket.on('change_video', ({ videoId }) => {
+  socket.on('change_video', ({ videoId } = {}) => {
     const roomId = socket.data.roomId;
     const room = roomModel.getRoom(roomId);
     const participant = room?.participants.get(socket.id);
@@ -88,10 +88,14 @@ function registerSocketHandlers(io, socket) {
       return socket.emit('error', 'Not permitted to change video');
     }
 
+    if (typeof videoId !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      return socket.emit('error', 'A valid YouTube video ID is required');
+    }
+
     roomModel.updateVideo(roomId, videoId);
     io.to(roomId).emit('sync_state', {
       playState: room.playState,
-      currentTime: room.currentTime,
+      currentTime: roomModel.getCurrentTime(room),
       videoId: room.videoId
     });
   });
