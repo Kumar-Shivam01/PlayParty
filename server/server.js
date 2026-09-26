@@ -3,6 +3,7 @@ const { Server } = require('socket.io');
 const http = require('http');
 const cors = require('cors');
 require('dotenv').config();
+const mongoose = require('mongoose')
 
 const videoRoutes = require('./routes/videoRoutes');
 const { registerSocketHandlers } = require('./controllers/roomSocketController');
@@ -35,5 +36,8 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3004;
 server.listen(PORT, () => {
+  mongoose.connect(process.env.MONGODB_CONN_STR).then(()=>{
+    console.log(`DB Connected successfully!`)
+  })
   console.log(`PlayParty server is running on http://localhost:${PORT}`);
 });
