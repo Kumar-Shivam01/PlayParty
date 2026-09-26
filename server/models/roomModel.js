@@ -1,4 +1,6 @@
-// In-memory Room Model / Data Store
+const Room = require('./roomSchema');
+
+// In-memory Room Model with persistent sync to MongoDB Atlas
 class RoomModel {
   constructor() {
     this.rooms = new Map();
@@ -19,6 +21,7 @@ class RoomModel {
       lastUpdated: Date.now()
     };
     this.rooms.set(roomId, room);
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
     return room;
   }
 
@@ -30,6 +33,7 @@ class RoomModel {
     }
     const participant = { userId: socketId, username, role };
     room.participants.set(socketId, participant);
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
     return { room, participant };
   }
 
@@ -43,6 +47,7 @@ class RoomModel {
     let newHost = null;
     if (room.participants.size === 0) {
       this.rooms.delete(roomId);
+      Room.deleteOne({ roomId }).catch(err => console.error("Error deleting room in DB:", err.message));
       return { roomEmpty: true, roomId, leaver };
     }
 
@@ -54,6 +59,8 @@ class RoomModel {
         newHost.role = 'host';
       }
     }
+
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
 
     return {
       roomEmpty: false,
@@ -72,6 +79,18 @@ class RoomModel {
       room.currentTime = currentTime;
     }
     room.lastUpdated = Date.now();
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
+    return room;
+  }
+
+  updateSeek(roomId, currentTime) {
+    const room = this.getRoom(roomId);
+    if (!room) return null;
+    if (Number.isFinite(currentTime) && currentTime >= 0) {
+      room.currentTime = currentTime;
+    }
+    room.lastUpdated = Date.now();
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
     return room;
   }
 
@@ -82,7 +101,48 @@ class RoomModel {
     room.playState = 'paused';
     room.currentTime = 0;
     room.lastUpdated = Date.now();
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
     return room;
+  }
+
+  assignRole(roomId, targetUserId, newRole) {
+    const room = this.getRoom(roomId);
+    if (!room) return null;
+
+    const targetParticipant = room.participants.get(targetUserId);
+    if (!targetParticipant) return null;
+
+    targetParticipant.role = newRole;
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
+
+    return {
+      targetParticipant,
+      participantsList: [...room.participants.values()]
+    };
+  }
+
+  transferHost(roomId, newHostId) {
+    const room = this.getRoom(roomId);
+    if (!room) return null;
+
+    const oldHostId = room.hostId;
+    const oldHost = room.participants.get(oldHostId);
+    const newHost = room.participants.get(newHostId);
+    if (!newHost) return null;
+
+    if (oldHost) {
+      oldHost.role = 'moderator';
+    }
+    newHost.role = 'host';
+    room.hostId = newHostId;
+
+    this.persistRoom(room).catch(err => console.error("Error persisting room:", err.message));
+
+    return {
+      oldHost,
+      newHost,
+      participantsList: [...room.participants.values()]
+    };
   }
 
   getCurrentTime(room) {
@@ -95,9 +155,41 @@ class RoomModel {
     const ROLE_PERMISSIONS = {
       play: ['host', 'moderator'],
       pause: ['host', 'moderator'],
-      change_video: ['host', 'moderator']
+      seek: ['host', 'moderator'],
+      change_video: ['host', 'moderator'],
+      assign_role: ['host'],
+      remove_participant: ['host'],
+      transfer_host: ['host']
     };
     return ROLE_PERMISSIONS[action]?.includes(role);
+  }
+
+  async persistRoom(room) {
+    if (!room) return;
+    try {
+      const participantsArray = [...room.participants.values()].map(p => ({
+        userId: p.userId,
+        username: p.username,
+        role: p.role
+      }));
+
+      await Room.findOneAndUpdate(
+        { roomId: room.id },
+        {
+          roomId: room.id,
+          hostId: room.hostId,
+          videoId: room.videoId,
+          playState: room.playState,
+          currentTime: this.getCurrentTime(room),
+          participants: participantsArray,
+          lastActive: new Date()
+        },
+        { upsert: true, new: true }
+      );
+    } catch (e) {
+      // Don't crash in-memory state if DB call has transient errors
+      // console.error("MongoDB Room persist error:", e.message);
+    }
   }
 }
 
