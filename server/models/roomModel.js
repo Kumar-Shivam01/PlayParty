@@ -64,10 +64,13 @@ class RoomModel {
     };
   }
 
-  updatePlayState(roomId, playState) {
+  updatePlayState(roomId, playState, currentTime) {
     const room = this.getRoom(roomId);
     if (!room) return null;
     room.playState = playState;
+    if (Number.isFinite(currentTime) && currentTime >= 0) {
+      room.currentTime = currentTime;
+    }
     room.lastUpdated = Date.now();
     return room;
   }
@@ -80,6 +83,12 @@ class RoomModel {
     room.currentTime = 0;
     room.lastUpdated = Date.now();
     return room;
+  }
+
+  getCurrentTime(room) {
+    if (!room) return 0;
+    if (room.playState !== 'playing') return room.currentTime;
+    return room.currentTime + (Date.now() - room.lastUpdated) / 1000;
   }
 
   hasPermission(role, action) {
