@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
-import YoutubePlayer from './YoutubePlayer';
-import ChangeVideoForm from './ChangeVideoForm';
+import YoutubePlayer from './components/YoutubePlayer';
+import ChangeVideoForm from './components/ChangeVideoForm';
+import PlaybackControls from './components/PlaybackControls';
+import ParticipantsList from './components/ParticipantsList';
+import ActionRequestToast from './components/ActionRequestToast';
 import { socket } from './services/socketService';
 
 function syncPlayer(player, { videoId, currentTime = 0, playState = "paused" }, forceLoad = false) {
@@ -13,9 +16,15 @@ function syncPlayer(player, { videoId, currentTime = 0, playState = "paused" }, 
     return;
   }
 
-  if (Math.abs((player.getCurrentTime?.() || 0) - startSeconds) > 1.5) player.seekTo(startSeconds, true);
-  if (playState === "playing" && player.getPlayerState?.() !== 1) player.playVideo();
-  if (playState === "paused" && player.getPlayerState?.() !== 2) player.pauseVideo();
+  if (Math.abs((player.getCurrentTime?.() || 0) - startSeconds) > 1.5) {
+    player.seekTo(startSeconds, true);
+  }
+  if (playState === "playing" && player.getPlayerState?.() !== 1) {
+    player.playVideo();
+  }
+  if (playState === "paused" && player.getPlayerState?.() !== 2) {
+    player.pauseVideo();
+  }
 }
 
 function App() {
@@ -26,200 +35,387 @@ function App() {
   const [role, setRole] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [videoId, setVideoId] = useState(null);
+  const [playState, setPlayState] = useState("paused");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [pendingRequest, setPendingRequest] = useState(null);
+  const [notification, setNotification] = useState(null);
+
   const playerRef = useRef(null);
   const roomPlaybackRef = useRef({ videoId: null, currentTime: 0, playState: "paused" });
 
-  useEffect(() => { // handle the connect and disconnect events
+  const showNotification = (msg, type = "info") => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  useEffect(() => {
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
-    // handle the joined room event
-    const handleJoinedRoom = ({ role: myRole, participants: roomParticipants, videoId: roomVideoId, currentTime, playState }) => {
+
+    const handleJoinedRoom = ({ role: myRole, participants: roomParticipants, videoId: roomVideoId, currentTime: curTime, playState: state }) => {
       setJoined(true);
       setRole(myRole);
       setParticipants(roomParticipants || []);
-      const playback = { videoId: roomVideoId || null, currentTime: currentTime || 0, playState: playState || "paused" };
-      roomPlaybackRef.current = playback;
-      setVideoId(playback.videoId);
-      syncPlayer(playerRef.current, playback);
-    };
-
-    const handleUserJoined = ({ participants: roomParticipants }) => {
-      setParticipants(roomParticipants || []);
-    };
-
-    const handleUserLeft = ({ participants: roomParticipants }) => {
-      setParticipants(roomParticipants || []);
-    };
-
-    const handleRoomUpdated = ({ hostId, hostname }) => {
-      if (socket.id === hostId) {
-        setRole('host');
-      }
-    };
-
-    const handleSyncState = ({ playState, currentTime, videoId: newVideoId }) => { // synchronise state across all clients
       const playback = {
-        videoId: newVideoId ?? roomPlaybackRef.current.videoId,
-        currentTime: currentTime ?? roomPlaybackRef.current.currentTime,
-        playState: playState ?? roomPlaybackRef.current.playState
+        videoId: roomVideoId || null,
+        currentTime: curTime || 0,
+        playState: state || "paused"
       };
       roomPlaybackRef.current = playback;
       setVideoId(playback.videoId);
+      setPlayState(playback.playState);
+      setCurrentTime(playback.currentTime);
       syncPlayer(playerRef.current, playback);
     };
 
-    socket.on("connect", handleConnect); // handle the connection event
-    socket.on("disconnect", handleDisconnect); // handle the disconnection event
+    const handleUserJoined = ({ username: user, role: userRole, participants: roomParticipants }) => {
+      setParticipants(roomParticipants || []);
+      showNotification(`${user} joined as ${userRole}`);
+    };
+
+    const handleUserLeft = ({ username: user, participants: roomParticipants }) => {
+      setParticipants(roomParticipants || []);
+      if (user) showNotification(`${user} left the room`);
+    };
+
+    const handleRoleAssigned = ({ userId, username: user, role: newRole, participants: roomParticipants }) => {
+      setParticipants(roomParticipants || []);
+      if (socket.id === userId) {
+        setRole(newRole);
+        showNotification(`Your role was updated to: ${newRole.toUpperCase()}`, "success");
+      } else {
+        showNotification(`${user}'s role was updated to ${newRole}`);
+      }
+    };
+
+    const handleHostTransferred = ({ newHostId, newHostName, participants: roomParticipants }) => {
+      setParticipants(roomParticipants || []);
+      if (socket.id === newHostId) {
+        setRole('host');
+        showNotification("You are now the Host of this room! 👑", "success");
+      } else {
+        showNotification(`${newHostName} is now the Host!`);
+      }
+    };
+
+    const handleParticipantRemoved = ({ userId, participants: roomParticipants }) => {
+      setParticipants(roomParticipants || []);
+    };
+
+    const handleKicked = ({ message }) => {
+      setJoined(false);
+      setRole(null);
+      setParticipants([]);
+      alert(message || "You have been removed from the room.");
+    };
+
+    const handleActionRequested = (req) => {
+      setPendingRequest(req);
+    };
+
+    const handleSyncState = ({ playState: newState, currentTime: newTime, videoId: newVideoId }) => {
+      const playback = {
+        videoId: newVideoId ?? roomPlaybackRef.current.videoId,
+        currentTime: newTime ?? roomPlaybackRef.current.currentTime,
+        playState: newState ?? roomPlaybackRef.current.playState
+      };
+      roomPlaybackRef.current = playback;
+      setVideoId(playback.videoId);
+      setPlayState(playback.playState);
+      setCurrentTime(playback.currentTime);
+      syncPlayer(playerRef.current, playback);
+    };
+
+    const handleError = (errorMsg) => {
+      showNotification(typeof errorMsg === 'string' ? errorMsg : 'An error occurred', 'error');
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
     socket.on("joined_room", handleJoinedRoom);
     socket.on("room_joined", handleJoinedRoom);
     socket.on("user_joined", handleUserJoined);
     socket.on("user_left", handleUserLeft);
-    socket.on("room_updated", handleRoomUpdated);
+    socket.on("role_assigned", handleRoleAssigned);
+    socket.on("host_transferred", handleHostTransferred);
+    socket.on("participant_removed", handleParticipantRemoved);
+    socket.on("kicked_from_room", handleKicked);
+    socket.on("action_requested", handleActionRequested);
     socket.on("sync_state", handleSyncState);
+    socket.on("error", handleError);
 
     return () => {
-      socket.off("connect", handleConnect);  // remove the connection event listener
-      socket.off("disconnect", handleDisconnect);  // remove the disconnection event listener
-      socket.off("joined_room", handleJoinedRoom); // remove the joined room event listener
-      socket.off("room_joined", handleJoinedRoom); // remove the room joined event listener
-      socket.off("user_joined", handleUserJoined); // remove the user joined event listener
-      socket.off("user_left", handleUserLeft); // remove the user left event listener
-      socket.off("room_updated", handleRoomUpdated); // remove the room updated event listener
-      socket.off("sync_state", handleSyncState); // remove the sync state event listener
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("joined_room", handleJoinedRoom);
+      socket.off("room_joined", handleJoinedRoom);
+      socket.off("user_joined", handleUserJoined);
+      socket.off("user_left", handleUserLeft);
+      socket.off("role_assigned", handleRoleAssigned);
+      socket.off("host_transferred", handleHostTransferred);
+      socket.off("participant_removed", handleParticipantRemoved);
+      socket.off("kicked_from_room", handleKicked);
+      socket.off("action_requested", handleActionRequested);
+      socket.off("sync_state", handleSyncState);
+      socket.off("error", handleError);
     };
   }, []);
 
-  const handleJoin = (e) => {  // handle the join event
+  // Update current time locally during playback for scrub slider
+  useEffect(() => {
+    let interval = null;
+    if (playState === "playing") {
+      interval = setInterval(() => {
+        if (playerRef.current?.getCurrentTime) {
+          const t = playerRef.current.getCurrentTime();
+          if (Number.isFinite(t)) setCurrentTime(t);
+        }
+      }, 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [playState]);
+
+  const handleJoin = (e) => {
     e?.preventDefault();
     if (!roomId.trim() || !username.trim()) return;
     socket.emit("join_room", { roomId: roomId.trim(), username: username.trim() });
   };
 
+  const handleLeave = () => {
+    socket.emit("leave_room");
+    setJoined(false);
+    setRole(null);
+    setParticipants([]);
+    setVideoId(null);
+  };
+
   const handlePlayerReady = (player) => {
-    playerRef.current = player;  // set the player ref
+    playerRef.current = player;
     syncPlayer(player, roomPlaybackRef.current, true);
   };
 
   const getPlayerTime = () => {
-    const currentTime = playerRef.current?.getCurrentTime?.();
-    return Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+    const cur = playerRef.current?.getCurrentTime?.();
+    return Number.isFinite(cur) && cur >= 0 ? cur : currentTime;
   };
 
-  const canControl = role === "host" || role === "moderator"; // check if the user is host or moderator
+  const canControl = role === "host" || role === "moderator";
 
-  if (!joined) { // if the user is not joined
+  // RBAC Socket Actions
+  const handlePlay = () => {
+    socket.emit("play", { currentTime: getPlayerTime() });
+  };
+
+  const handlePause = () => {
+    socket.emit("pause", { currentTime: getPlayerTime() });
+  };
+
+  const handleSeek = (time) => {
+    socket.emit("seek", { time });
+  };
+
+  const handleChangeVideo = (id) => {
+    socket.emit("change_video", { videoId: id });
+  };
+
+  const handleAssignRole = (userId, newRole) => {
+    socket.emit("assign_role", { userId, role: newRole });
+  };
+
+  const handleRemoveParticipant = (userId) => {
+    socket.emit("remove_participant", { userId });
+  };
+
+  const handleTransferHost = (newHostId) => {
+    socket.emit("transfer_host", { newHostId });
+  };
+
+  // Non-privileged participant requests
+  const handleRequestAction = (actionType, data = null) => {
+    socket.emit("request_action", { actionType, data });
+    showNotification(`Request to ${actionType} sent to Host/Mods`, "info");
+  };
+
+  const handleApproveRequest = (req) => {
+    if (req.actionType === "play") handlePlay();
+    if (req.actionType === "pause") handlePause();
+    if (req.actionType === "change_video") handleChangeVideo(req.data.videoId);
+    setPendingRequest(null);
+  };
+
+  // Join screen
+  if (!joined) {
     return (
-      <div style={{ maxWidth: 480, margin: "60px auto", padding: 30, fontFamily: "system-ui, sans-serif", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
-        <h1 style={{ marginTop: 0, marginBottom: 10, color: "#111" }}>Watch Party</h1>
-        <p style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.95rem", color: "#555" }}>
-          Status: {connected ? "🟢 Connected" : "🔴 Disconnected"}
-        </p>
-        <form onSubmit={handleJoin} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 20 }}>
-          <div>
-            <label style={{ display: "block", marginBottom: 4, fontSize: "0.9rem", fontWeight: "bold" }}>Room Code</label>
-            <input
-              style={{ width: "100%", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, boxSizing: "border-box" }}
-              placeholder="e.g. 123"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              required
-            />
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+              <span>🍿</span> PlayParty
+            </h1>
+            <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700">
+              <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-rose-500'}`}></span>
+              <span className={connected ? 'text-emerald-400' : 'text-rose-400'}>
+                {connected ? 'Connected' : 'Disconnected'}
+              </span>
+            </span>
           </div>
-          <div>
-            <label style={{ display: "block", marginBottom: 4, fontSize: "0.9rem", fontWeight: "bold" }}>Your Name</label>
-            <input
-              style={{ width: "100%", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, boxSizing: "border-box" }}
-              placeholder="e.g. Alex"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
+
+          <p className="text-slate-400 text-sm mb-6">
+            Watch YouTube videos together with friends in real-time. Full sync and role-based permissions.
+          </p>
+
+          <form onSubmit={handleJoin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Room Code
+              </label>
+              <input
+                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                placeholder="e.g. anime-night-42"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value)}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Your Username
+              </label>
+              <input
+                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                placeholder="e.g. Alex"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={!connected}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg shadow-lg shadow-blue-600/30 transition cursor-pointer mt-2"
+            >
+              Join or Create Room
+            </button>
+          </form>
+
+          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
+            <span className="text-xs text-slate-400">
+              Room creator automatically becomes <strong>Host</strong> 👑
+            </span>
           </div>
-          <button
-            type="submit"
-            style={{
-              padding: "10px 16px",
-              backgroundColor: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              fontWeight: 600,
-              cursor: "pointer",
-              marginTop: 10
-            }}
-          >
-            Join / Create Room
-          </button>
-        </form>
+        </div>
       </div>
     );
   }
 
+  // In-room view
   return (
-    <div style={{ maxWidth: 900, margin: "20px auto", padding: "20px 40px", fontFamily: "system-ui, sans-serif" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: 15 }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Room: <span style={{ color: "#2563eb" }}>{roomId}</span></h1>
-          <p style={{ margin: "5px 0 0", color: "#666" }}>
-            Your role: <strong style={{ textTransform: "capitalize", color: "#111" }}>{role}</strong>
-          </p>
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
+      {/* Toast Notification */}
+      {notification && (
+        <div className={`fixed top-5 right-5 z-50 px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold border ${
+          notification.type === 'error'
+            ? 'bg-rose-950 border-rose-800 text-rose-200'
+            : notification.type === 'success'
+            ? 'bg-emerald-950 border-emerald-800 text-emerald-200'
+            : 'bg-slate-800 border-slate-700 text-slate-200'
+        }`}>
+          {notification.msg}
         </div>
-        <span style={{ fontSize: "0.9rem", color: connected ? "#16a34a" : "#dc2626" }}>
-          {connected ? "● Connected" : "● Disconnected"}
-        </span>
-      </header>
-
-      {/* YouTube Player */}
-      <YoutubePlayer videoId={videoId} onPlayerReady={handlePlayerReady} />
-
-      {/* Controls and Video Input */}
-      {canControl ? (
-        <div style={{ marginTop: 20 }}>
-          <div style={{ display: "flex", gap: 10, marginBottom: 15 }}>
-            <button
-              style={{ padding: "8px 20px", cursor: "pointer", fontWeight: "bold", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: 5 }}
-              onClick={() => socket.emit("play", { currentTime: getPlayerTime() })}
-            >
-              ▶ Play
-            </button>
-            <button
-              style={{ padding: "8px 20px", cursor: "pointer", fontWeight: "bold", backgroundColor: "#f59e0b", color: "white", border: "none", borderRadius: 5 }}
-              onClick={() => socket.emit("pause", { currentTime: getPlayerTime() })}
-            >
-              ⏸ Pause
-            </button>
-          </div>
-          <ChangeVideoForm onConfirm={(id) => socket.emit("change_video", { videoId: id })} />
-        </div>
-      ) : (
-        <p style={{ color: "#777", fontStyle: "italic" }}>
-          Only the host or moderator can change videos and control playback.
-        </p>
       )}
 
-      {/* Participants List */}
-      <div style={{ marginTop: 30, borderTop: "1px solid #eee", paddingTop: 15 }}>
-        <h3 style={{ margin: "0 0 10px 0" }}>Participants ({participants.length})</h3>
-        <ul style={{ listStyleType: "none", padding: 0, margin: 0, display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {participants.map((p) => (
-            <li
-              key={p.userId}
-              style={{
-                backgroundColor: "#f3f4f6",
-                padding: "6px 14px",
-                borderRadius: 20,
-                fontSize: "0.9rem",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6
+      {/* Participant Request Toast for Host/Mod */}
+      {canControl && (
+        <ActionRequestToast
+          request={pendingRequest}
+          onApprove={handleApproveRequest}
+          onDismiss={() => setPendingRequest(null)}
+        />
+      )}
+
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">🍿</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold text-white">PlayParty</h1>
+                <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono border border-slate-700">
+                  Room: {roomId}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                You are: <strong className="text-blue-400 capitalize">{username}</strong> ({role})
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText?.(roomId);
+                showNotification("Room code copied to clipboard!", "success");
               }}
+              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition"
             >
-              <strong>{p.username}</strong>
-              <span style={{ color: "#6b7280", fontSize: "0.8rem" }}>({p.role})</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+              📋 Copy Code
+            </button>
+            <button
+              onClick={handleLeave}
+              className="text-xs bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 font-semibold px-3 py-1.5 rounded-lg border border-rose-500/30 transition"
+            >
+              Leave Room
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Layout */}
+      <main className="max-w-7xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Player & Controls (2 Cols) */}
+        <div className="lg:col-span-2 space-y-4">
+          <YoutubePlayer
+            videoId={videoId}
+            onPlayerReady={handlePlayerReady}
+            onDurationChange={(d) => setDuration(d)}
+          />
+
+          <PlaybackControls
+            playState={playState}
+            currentTime={currentTime}
+            duration={duration}
+            canControl={canControl}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onSeek={handleSeek}
+            onRequestAction={handleRequestAction}
+          />
+
+          <ChangeVideoForm
+            canControl={canControl}
+            onConfirm={handleChangeVideo}
+            onRequestVideoChange={(vid) => handleRequestAction("change_video", { videoId: vid })}
+          />
+        </div>
+
+        {/* Right Column: Participants & Role Control Sidebar */}
+        <div className="space-y-4">
+          <ParticipantsList
+            participants={participants}
+            currentUserId={socket.id}
+            currentRole={role}
+            onAssignRole={handleAssignRole}
+            onRemoveParticipant={handleRemoveParticipant}
+            onTransferHost={handleTransferHost}
+          />
+        </div>
+      </main>
     </div>
   );
 }
