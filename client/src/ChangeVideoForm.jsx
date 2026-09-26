@@ -6,7 +6,6 @@ import { extractVideoId } from "./utils/videoUtils";
 export default function ChangeVideoForm({ onConfirm }) {
   const [raw, setRaw] = useState("");
   const videoId = raw ? extractVideoId(raw) : null;
-
   const { data, isFetching, isError } = useQuery({
     queryKey: ["video-info", videoId],
     queryFn: () => fetchVideoInfo(videoId),
@@ -15,9 +14,10 @@ export default function ChangeVideoForm({ onConfirm }) {
     retry: 1,
   });
 
-  const handleConfirm = () => {
-    if (videoId) {
-      onConfirm(videoId);
+  const handleConfirm = (idToUse) => {
+    const targetId = typeof idToUse === "string" ? idToUse : videoId;
+    if (targetId) {
+      onConfirm(targetId);
       setRaw("");
     }
   };
@@ -36,7 +36,7 @@ export default function ChangeVideoForm({ onConfirm }) {
         />
         <button
           style={{ padding: "8px 16px", cursor: "pointer" }}
-          onClick={handleConfirm}
+          onClick={() => handleConfirm(videoId)}
           disabled={!videoId || videoId.length !== 11}
         >
           Load Video
@@ -44,6 +44,7 @@ export default function ChangeVideoForm({ onConfirm }) {
       </div>
 
       {isFetching && <p style={{ color: "#666", marginTop: 8 }}>Loading preview…</p>}
+      {raw && !videoId && <p style={{ color: "#d32f2f", marginTop: 8 }}>Enter a valid YouTube URL or 11-character video ID.</p>}
       {isError && <p style={{ color: "#d32f2f", marginTop: 8 }}>Couldn't find that video</p>}
 
       {data && (
@@ -53,7 +54,7 @@ export default function ChangeVideoForm({ onConfirm }) {
             <p style={{ margin: "0 0 8px 0", fontWeight: 500 }}>{data.title}</p>
             <button
               style={{ padding: "6px 12px", cursor: "pointer" }}
-              onClick={handleConfirm}
+              onClick={() => handleConfirm(videoId)}
             >
               Set as current video
             </button>
