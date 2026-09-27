@@ -4,6 +4,7 @@ import ChangeVideoForm from './components/ChangeVideoForm';
 import PlaybackControls from './components/PlaybackControls';
 import ParticipantsList from './components/ParticipantsList';
 import ActionRequestToast from './components/ActionRequestToast';
+import ChatBox from './components/ChatBox';
 import { socket } from './services/socketService';
 
 function syncPlayer(player, { videoId, currentTime = 0, playState = "paused" }, forceLoad = false) {
@@ -40,6 +41,8 @@ function App() {
   const [duration, setDuration] = useState(0);
   const [pendingRequest, setPendingRequest] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [sidebarTab, setSidebarTab] = useState('chat'); // 'chat' or 'participants'
 
   const playerRef = useRef(null);
   const roomPlaybackRef = useRef({ videoId: null, currentTime: 0, playState: "paused" });
@@ -127,6 +130,10 @@ function App() {
       syncPlayer(playerRef.current, playback);
     };
 
+    const handleNewMessage = (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    };
+
     const handleError = (errorMsg) => {
       showNotification(typeof errorMsg === 'string' ? errorMsg : 'An error occurred', 'error');
     };
@@ -143,6 +150,7 @@ function App() {
     socket.on("kicked_from_room", handleKicked);
     socket.on("action_requested", handleActionRequested);
     socket.on("sync_state", handleSyncState);
+    socket.on("new_message", handleNewMessage);
     socket.on("error", handleError);
 
     return () => {
@@ -158,6 +166,7 @@ function App() {
       socket.off("kicked_from_room", handleKicked);
       socket.off("action_requested", handleActionRequested);
       socket.off("sync_state", handleSyncState);
+      socket.off("new_message", handleNewMessage);
       socket.off("error", handleError);
     };
   }, []);
@@ -189,6 +198,7 @@ function App() {
     setJoined(false);
     setRole(null);
     setParticipants([]);
+    setMessages([]);
     setVideoId(null);
   };
 
@@ -231,6 +241,11 @@ function App() {
 
   const handleTransferHost = (newHostId) => {
     socket.emit("transfer_host", { newHostId });
+  };
+
+  const handleSendMessage = (messageText) => {
+    if (!messageText?.trim()) return;
+    socket.emit("send_message", { message: messageText.trim() });
   };
 
   // Non-privileged participant requests
@@ -404,16 +419,54 @@ function App() {
           />
         </div>
 
-        {/* Right Column: Participants & Role Control Sidebar */}
-        <div className="space-y-4">
-          <ParticipantsList
-            participants={participants}
-            currentUserId={socket.id}
-            currentRole={role}
-            onAssignRole={handleAssignRole}
-            onRemoveParticipant={handleRemoveParticipant}
-            onTransferHost={handleTransferHost}
-          />
+        {/* Right Column: Chat and Participants Sidebar */}
+        <div className="space-y-3">
+          {/* Tab selector */}
+          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl">
+            <button
+              onClick={() => setSidebarTab('chat')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 ${
+                sidebarTab === 'chat'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>💬</span> Chat
+              {messages.length > 0 && (
+                <span className="text-[10px] bg-slate-800 px-1.5 py-0.2 rounded-full border border-slate-700">
+                  {messages.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setSidebarTab('participants')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 ${
+                sidebarTab === 'participants'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>👥</span> People ({participants.length})
+            </button>
+          </div>
+
+          {/* Tab content */}
+          {sidebarTab === 'chat' ? (
+            <ChatBox
+              messages={messages}
+              currentUserId={socket.id}
+              onSendMessage={handleSendMessage}
+            />
+          ) : (
+            <ParticipantsList
+              participants={participants}
+              currentUserId={socket.id}
+              currentRole={role}
+              onAssignRole={handleAssignRole}
+              onRemoveParticipant={handleRemoveParticipant}
+              onTransferHost={handleTransferHost}
+            />
+          )}
         </div>
       </main>
     </div>
