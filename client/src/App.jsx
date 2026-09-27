@@ -205,6 +205,21 @@ function App() {
   const handlePlayerReady = (player) => {
     playerRef.current = player;
     syncPlayer(player, roomPlaybackRef.current, true);
+    const dur = player.getDuration?.() || 0;
+    if (dur > 0) setDuration(dur);
+  };
+
+  const handlePlayerStateChange = (stateCode, player) => {
+    // Sync duration if ready
+    const dur = player?.getDuration?.() || 0;
+    if (dur > 0) setDuration(dur);
+
+    // YT.PlayerState: 1 = PLAYING, 2 = PAUSED
+    if (stateCode === 1 && playState !== "playing") {
+      setPlayState("playing");
+    } else if (stateCode === 2 && playState !== "paused") {
+      setPlayState("paused");
+    }
   };
 
   const getPlayerTime = () => {
@@ -214,16 +229,33 @@ function App() {
 
   const canControl = role === "host" || role === "moderator";
 
-  // RBAC Socket Actions
+  // Playback Control Actions wired to Player API and Socket
   const handlePlay = () => {
-    socket.emit("play", { currentTime: getPlayerTime() });
+    const cur = getPlayerTime();
+    // Directly trigger player play
+    if (playerRef.current?.playVideo) {
+      playerRef.current.playVideo();
+    }
+    setPlayState("playing");
+    socket.emit("play", { currentTime: cur });
   };
 
   const handlePause = () => {
-    socket.emit("pause", { currentTime: getPlayerTime() });
+    const cur = getPlayerTime();
+    // Directly trigger player pause
+    if (playerRef.current?.pauseVideo) {
+      playerRef.current.pauseVideo();
+    }
+    setPlayState("paused");
+    socket.emit("pause", { currentTime: cur });
   };
 
   const handleSeek = (time) => {
+    setCurrentTime(time);
+    // Directly scrub player to target time
+    if (playerRef.current?.seekTo) {
+      playerRef.current.seekTo(time, true);
+    }
     socket.emit("seek", { time });
   };
 
@@ -399,6 +431,7 @@ function App() {
             videoId={videoId}
             onPlayerReady={handlePlayerReady}
             onDurationChange={(d) => setDuration(d)}
+            onStateChange={handlePlayerStateChange}
           />
 
           <PlaybackControls
