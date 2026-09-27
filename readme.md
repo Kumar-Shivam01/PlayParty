@@ -121,13 +121,13 @@ cd ../server && npm start
 
 ## 📸 Screenshots (placeholders)
 <!-- Screenshot: Host view -->
-![Host view placeholder](https://via.placeholder.com/800x450?text=Host+View)
+![Host view placeholder](screenshots/Host.png)
 
 <!-- Screenshot: Participant view -->
-![Participant view placeholder](https://via.placeholder.com/800x450?text=Participant+View)
+![Participant view placeholder](screenshots/Participant.png)
 
 <!-- Screenshot: Join‑room interface -->
-![Join‑room placeholder](https://via.placeholder.com/800x450?text=Join+Room+Interface)
+![Join‑room placeholder](screenshots/join_room.png)
 
 ---
 
