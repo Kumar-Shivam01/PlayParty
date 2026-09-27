@@ -119,21 +119,22 @@ cd ../server && npm start
 
 ---
 
-## 📸 Screenshots (placeholders)
+## 📸 Screenshots 
+<!-- Screenshot: Join‑room interface -->
+![Join‑room placeholder](screenshots/join_room.png)
+
 <!-- Screenshot: Host view -->
 ![Host view placeholder](screenshots/Host.png)
 
 <!-- Screenshot: Participant view -->
 ![Participant view placeholder](screenshots/Participant.png)
 
-<!-- Screenshot: Join‑room interface -->
-![Join‑room placeholder](screenshots/join_room.png)
 
 ---
 
 ## 🌐 Live Demo
 <!-- Live URL placeholder -->
-[Live URL pending]
+https://play-party.vercel.app/
 
 ---
 
