@@ -32,16 +32,18 @@ function loadYoutubeAPI() {
   return apiLoadPromise;
 }
 
-function YoutubePlayer({ videoId, onPlayerReady, onDurationChange }) {
+function YoutubePlayer({ videoId, onPlayerReady, onDurationChange, onStateChange }) {
   const containerRef = useRef(null);
   const playerRef = useRef(null);
   const onPlayerReadyRef = useRef(onPlayerReady);
   const onDurationChangeRef = useRef(onDurationChange);
+  const onStateChangeRef = useRef(onStateChange);
 
   useEffect(() => {
     onPlayerReadyRef.current = onPlayerReady;
     onDurationChangeRef.current = onDurationChange;
-  }, [onPlayerReady, onDurationChange]);
+    onStateChangeRef.current = onStateChange;
+  }, [onPlayerReady, onDurationChange, onStateChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,9 +67,12 @@ function YoutubePlayer({ videoId, onPlayerReady, onDurationChange }) {
         videoId,
         playerVars: {
           autoplay: 0,
-          controls: 1,
-          rel: 0,
-          enablejsapi: 1,
+          controls: 0, // YouTube native controls disabled (play/pause, progress bar, volume)
+          modestbranding: 1, // Minimize YouTube logo
+          rel: 0, // Do not show related videos from other channels
+          enablejsapi: 1, // Enable JavaScript control via IFrame API
+          disablekb: 1, // Disable keyboard controls on iframe directly
+          iv_load_policy: 3, // Disable video annotations
           origin: window.location.origin
         },
         events: {
@@ -81,12 +86,12 @@ function YoutubePlayer({ videoId, onPlayerReady, onDurationChange }) {
             }
           },
           onStateChange: (event) => {
-            if (event.data === YT.PlayerState.PLAYING) {
-              const dur = event.target.getDuration?.() || 0;
-              if (onDurationChangeRef.current && dur > 0) {
-                onDurationChangeRef.current(dur);
-              }
+            if (cancelled) return;
+            const dur = event.target.getDuration?.() || 0;
+            if (onDurationChangeRef.current && dur > 0) {
+              onDurationChangeRef.current(dur);
             }
+            onStateChangeRef.current?.(event.data, event.target);
           }
         },
       });
