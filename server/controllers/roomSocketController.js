@@ -239,12 +239,39 @@ function registerSocketHandlers(io, socket) {
     });
   });
 
-  // 10. Leave Room (explicit user action)
+  // 10. Chat Message Handler
+  socket.on('send_message', ({ message } = {}) => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+
+    if (typeof message !== 'string' || !message.trim()) {
+      return socket.emit('error', 'Message cannot be empty');
+    }
+
+    const trimmedMsg = message.trim().slice(0, 500); // Limit message length to 500 characters
+    const room = roomModel.getRoom(roomId);
+    const participant = room?.participants.get(socket.id);
+    const userRole = participant?.role || socket.data.role || 'participant';
+    const userName = participant?.username || socket.data.username || 'Anonymous';
+
+    const chatPayload = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: socket.id,
+      username: userName,
+      role: userRole,
+      message: trimmedMsg,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    io.to(roomId).emit('new_message', chatPayload);
+  });
+
+  // 11. Leave Room (explicit user action)
   socket.on('leave_room', () => {
     handleUserLeave(io, socket);
   });
 
-  // 11. Disconnect
+  // 12. Disconnect
   socket.on('disconnect', () => {
     handleUserLeave(io, socket);
   });
