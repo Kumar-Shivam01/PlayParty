@@ -138,8 +138,8 @@ function App() {
       showNotification(typeof errorMsg === 'string' ? errorMsg : 'An error occurred', 'error');
     };
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
+    socket.on("connect", handleConnect); //socket's own internal "connect" event fires once the handshake completes
+    socket.on("disconnect", handleDisconnect); //socket's own internal "disconnect" event fires once the handshake completes
     socket.on("joined_room", handleJoinedRoom);
     socket.on("room_joined", handleJoinedRoom);
     socket.on("user_joined", handleUserJoined);
@@ -187,10 +187,10 @@ function App() {
     };
   }, [playState]);
 
-  const handleJoin = (e) => {
+  const handleJoin = (e) => { //Passes on: { roomId, username } to the server over the already-open socket.
     e?.preventDefault();
     if (!roomId.trim() || !username.trim()) return;
-    socket.emit("join_room", { roomId: roomId.trim(), username: username.trim() });
+    socket.emit("join_room", { roomId: roomId.trim(), username: username.trim() }); //emit "join_room" event to the server when user clicks join
   };
 
   const handleLeave = () => {

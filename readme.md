@@ -82,6 +82,32 @@ PlayParty-MERN-SocketIO/
 
 ---
 
+## Short Description of how Webscockets Integrate with the flow - 
+WebSockets (via Socket.IO) are the single real-time transport connecting the React client to the Node.js server. The client creates one shared socket instance, and the server registers event handlers per connection — all room state (playback sync, roles, chat, membership) flows through emit/listen pairs, with the server broadcasting authoritative state via io.to(roomId).emit(...).
+
+## How it fits together
+
+**Connection layer**
+Client: a module-level singleton socket connects on import — socket = io(SERVER_URL) in client/src/services/socketService.js. socketService.js:1-5
+
+Server: Socket.IO is attached to the same http.Server as Express, with CORS allow-listing client origins, and every new connection delegates to registerSocketHandlers. server.js:26-35
+
+**Bidirectional event contract**
+Client → Server: user actions emit events like join_room, play, pause, seek, change_video, assign_role, send_message, etc. App.jsx:233-285
+
+Server: each event handler validates the sender's role via roomModel.hasPermission, mutates room state, then broadcasts to the room channel (e.g., io.to(roomId).emit('sync_state', ...)). roomSocketController.js:45-58
+
+**Key integration pattern**
+The WebSocket layer is the only channel for room state: there is no polling or REST fallback for playback. Socket.IO's room primitive (socket.join(roomId) / io.to(roomId)) scopes every broadcast to the right room, and socket.data carries per-connection identity (roomId, username, role) so every handler can authorize without re-lookup. roomSocketController.js:15-18
+
+**Notes**
+Express still serves REST endpoints (/api → videoRoutes) alongside the socket server on the same HTTP instance, but those are separate from the real-time flow. server.js:23
+
+Disconnect handling (disconnect / leave_room) funnels into a shared handleUserLeave that cleans up room membership and auto-transfers host if needed. roomSocketController.js:270-277
+
+---
+
+
 ## ⚙️ Setup & Run Instructions
 1. **Clone the repository**
    ```bash

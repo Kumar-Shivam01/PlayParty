@@ -30,8 +30,8 @@ const io = new Server(server, {
   }
 });
 
-io.on('connection', (socket) => {
-  registerSocketHandlers(io, socket);
+io.on('connection', (socket) => { // Register socket handlers for each new connection
+  registerSocketHandlers(io, socket); 
 });
 
 const PORT = process.env.PORT || 3004;

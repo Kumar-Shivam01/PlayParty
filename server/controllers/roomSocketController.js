@@ -1,6 +1,6 @@
 const roomModel = require('../models/roomModel');
 
-function registerSocketHandlers(io, socket) {
+function registerSocketHandlers(io, socket) { //Register socket event handlers for room-related events.
   // 1. Join Room
   socket.on('join_room', ({ roomId, username }) => {
     if (!roomId || !username) {

@@ -25,7 +25,7 @@ class RoomModel {
     return room;
   }
 
-  addParticipant(roomId, socketId, username, role) {
+  addParticipant(roomId, socketId, username, role) { 
     let room = this.getRoom(roomId);
     if (!room) {
       room = this.createRoom(roomId, socketId);
